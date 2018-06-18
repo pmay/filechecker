@@ -11,21 +11,28 @@ cs_ignore = [".md5", ".sha256"]
 
 
 def hash_data(filename, algorithm="sha256", blocksize=256*128):
-    m = hashlib.new(algorithm)
-    hash = hashlib.md5()
+    hash = hashlib.new(algorithm)
+    #hash = hashlib.md5()
     with open(filename, "rb") as f:
         for block in iter(lambda: f.read(blocksize), b""):
             hash.update(block)
     return hash.hexdigest()
 
 
-def checksum_dir(directory, recursive=False, ignore_ext=cs_ignore):
+def checksum_dir(directory, recursive=False, formats=None):
     """Checksums the specified directory, recursing down into subfolders as necessary"""
+
+    ignore_ext = cs_ignore
+
     if isdir(directory):
         for root, dirs, files in os.walk(directory):
-            files = [file for file in files if not file.lower().endswith(tuple(ignore_ext))]
+            if formats is None:
+                filtered_files = [file for file in files if not file.endswith(tuple(ignore_ext))]
+            else:
+                filtered_files = [file for file in files if (file.endswith(tuple(formats)) and
+                                                             not file.endswith(tuple(ignore_ext)))]
 
-            for file in files:
+            for file in filtered_files:
                 path = join(root, file)
                 r_path = join(".",relpath(path, directory))
                 hash = hash_data(path)
@@ -36,12 +43,12 @@ def checksum_dir(directory, recursive=False, ignore_ext=cs_ignore):
                 return
 
 
-def calculate_checksums(directory, recursive=False, manifest_file=None):
+def calculate_checksums(directory, recursive=False, formats=None, manifest_file=None):
     if manifest_file is None:
         manifest_file = join(directory, default_manifest)
 
     with open(manifest_file, 'w') as manifest:
-        for cs in checksum_dir(directory, recursive):
+        for cs in checksum_dir(directory, recursive, formats):
             manifest.write("{0} *{1}\n".format(cs[0], cs[1]))
             manifest.flush()
 
@@ -159,6 +166,8 @@ def main(args=None):
 
     ## Args for creating manifests
     create_parser = actionparser.add_parser("create")
+    create_parser.add_argument("--formats", dest="formats", nargs="+", help="list of file extensions to include (only)")
+    #create_parser.add_argument("--ignore", dest="ignore", help="list of additional file extensions to ignore")
     create_parser.add_argument("-m", dest="manifest", help="the manifest to create [default: manifest.md5 in dir]")
     create_parser.add_argument("-r", "--recursive", dest="recursive", action="store_true",
                                help="recurse into sub-folders [defaults")
@@ -177,9 +186,8 @@ def main(args=None):
     args = ap.parse_args()
 
     try:
-        #calculate_checksums(args.dir, args.recursive, args.out)
         if args.actions=='create':
-            calculate_checksums(args.dir, args.recursive, args.manifest)
+            calculate_checksums(args.dir, args.recursive, args.formats, args.manifest)
         elif args.actions=='validate':
             validate_checksums(args.dir, args.manifest)
     except AttributeError:
