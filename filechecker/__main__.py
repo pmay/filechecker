@@ -6,10 +6,12 @@ import sys
 from os.path import isdir, join, relpath
 from filechecker import __version__
 
-default_manifest = "manifest.md5"
+default_manifest = "manifest.sha256"
 cs_ignore = [".md5", ".sha256"]
 
-def md5sum(filename, blocksize=256*128):
+
+def hash_data(filename, algorithm="sha256", blocksize=256*128):
+    m = hashlib.new(algorithm)
     hash = hashlib.md5()
     with open(filename, "rb") as f:
         for block in iter(lambda: f.read(blocksize), b""):
@@ -26,7 +28,7 @@ def checksum_dir(directory, recursive=False, ignore_ext=cs_ignore):
             for file in files:
                 path = join(root, file)
                 r_path = join(".",relpath(path, directory))
-                hash = md5sum(path)
+                hash = hash_data(path)
                 #yield "{0} *{1}\n".format(hash, r_path)
                 yield (hash, r_path)
             if not recursive:
@@ -65,6 +67,37 @@ def _list_files(directory, base_path=None, recursive=True):
     return files
 
 
+def _print_results_list(results_list):
+    print ('\n'.join(results_list))
+
+
+def _write_report(results):
+    import csv
+    userdir = os.path.expanduser("~")
+    res_folder = join(userdir, "filechecker/reports")
+    if not os.path.exists(res_folder):
+        os.makedirs(res_folder)
+
+    with open(join(res_folder, "correct.csv"), 'w', newline='') as correct_csv:
+        out = csv.writer(correct_csv)
+        for el in results["found"]["correct"]:
+            out.writerow([el])
+
+    with open(join(res_folder, "incorrect.csv"), 'w', newline='') as incorrect_csv:
+        out = csv.writer(incorrect_csv)
+        for el in results["found"]["incorrect"]:
+            out.writerow([el])
+
+    with open(join(res_folder, "missing.csv"), 'w', newline='') as missing_csv:
+        out = csv.writer(missing_csv)
+        for el in results["missing"]:
+            out.writerow([el])
+
+    with open(join(res_folder, "additional.csv"), 'w', newline='') as additional_csv:
+        out = csv.writer(additional_csv)
+        for el in results["additional"]:
+            out.writerow([el])
+
 def validate_checksums(directory, manifest_file=None):
     if manifest_file is None:
         manifest_file = join(directory, default_manifest)
@@ -73,24 +106,22 @@ def validate_checksums(directory, manifest_file=None):
     original_cs = {}
     with open(manifest_file, 'r') as manifest:
         for line in manifest:
-            line_s = line.split(' ')
+            line_s = line.rstrip('\r\n').split(' ')
             original_cs[line_s[1][1:].strip()] = line_s[0]
 
-    # now list all files in the directory (incl. sub folders)
-    dir_filenames = {fname: None for fname in _list_files(directory)}
-
     results = {"found": {"correct": [], "incorrect": []},
-               "missing": []}
+               "missing": [],
+               "additional": {fname: None for fname in _list_files(directory)}}
 
     for f in original_cs.keys():
         full_path = join(directory, f)
         if os.path.exists(full_path):
-            current_cs = md5sum(full_path)
+            current_cs = hash_data(full_path)
             if current_cs == original_cs[f]:
                 results["found"]["correct"].append(f)
             else:
                 results["found"]["incorrect"].append(f)
-            del dir_filenames[f]
+            del results["additional"][f]
         else:
             results["missing"].append(f)
 
@@ -100,18 +131,20 @@ def validate_checksums(directory, manifest_file=None):
 
     else:
         print ("Correct Files:")
-        print (results["found"]["correct"])
+        _print_results_list(results["found"]["correct"])
 
         print ("\nIncorrect Files:")
-        print (results["found"]["incorrect"])
+        _print_results_list(results["found"]["incorrect"])
 
     if len(results["missing"]) > 0:
         print ("\nFiles listed in manifest, not in directory:")
-        print (results["missing"])
+        _print_results_list(results["missing"])
 
-    if len(dir_filenames) > 0:
-        print ("\nFiles not listed in manifest:")
-        print (dir_filenames.keys())
+    if len(results["additional"]) > 0:
+        print ("\nAdditional Files not listed in manifest:")
+        _print_results_list(results["additional"])
+
+    _write_report(results)
 
 
 def main(args=None):
