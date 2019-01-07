@@ -144,7 +144,7 @@ def validate_checksums(directory, manifest_file=None):
     original_cs = {}
     with open(manifest_file, 'r') as manifest:
         for line in manifest:
-            line_s = line.rstrip('\r\n').split(' ')
+            line_s = line.rstrip('\r\n').split(' ', 1)
             original_cs[line_s[1][1:].strip()] = line_s[0]
 
     results = {"found": {"correct": [], "incorrect": []},
@@ -152,7 +152,7 @@ def validate_checksums(directory, manifest_file=None):
                "additional": {fname: None for fname in _list_files(directory)}}
 
     for f in original_cs.keys():
-        full_path = join(directory, f)
+        full_path = join(directory, f[2:])
         if os.path.exists(full_path):
             current_cs = hash_data(full_path)
             if current_cs == original_cs[f]:
