@@ -4,6 +4,7 @@ import os
 import sys
 
 from os.path import isdir, join, relpath
+from progressbar import ProgressBar, UnknownLength
 from filechecker import __version__
 
 default_manifest = "manifest.sha256"
@@ -13,7 +14,7 @@ cs_ignore = [".md5", ".sha256"]
 def hash_data(filename, algorithm="sha256", blocksize=256*128):
     hash = hashlib.new(algorithm)
     #hash = hashlib.md5()
-    with open(filename, "rb") as f:
+    with open(u'\\\\?\\'+filename, "rb") as f:
         for block in iter(lambda: f.read(blocksize), b""):
             hash.update(block)
     return hash.hexdigest()
@@ -34,7 +35,7 @@ def checksum_dir(directory, recursive=False, formats=None):
 
             for file in filtered_files:
                 path = join(root, file)
-                r_path = join(".",relpath(path, directory))
+                r_path = join(".", relpath(path, directory))
                 hash = hash_data(path)
                 #yield "{0} *{1}\n".format(hash, r_path)
                 yield (hash, r_path)
@@ -43,7 +44,12 @@ def checksum_dir(directory, recursive=False, formats=None):
                 return
 
 
-def calculate_checksums(directory, recursive=False, formats=None, manifest_file=None):
+def calculate_checksums(directory, recursive=False, formats=None, manifest_file=None, timing=True):
+
+    if timing:
+        numfiles = _count_files(directory, recursive)
+        bar = ProgressBar(max_value=numfiles)
+
     if manifest_file is None:
         manifest_file = join(directory, default_manifest)
 
@@ -51,6 +57,30 @@ def calculate_checksums(directory, recursive=False, formats=None, manifest_file=
         for cs in checksum_dir(directory, recursive, formats):
             manifest.write("{0} *{1}\n".format(cs[0], cs[1]))
             manifest.flush()
+            if timing:
+                bar.update(bar.value+1)
+
+    if timing:
+        bar.finish()
+
+
+def _count_files(path, recursive=True):
+    """ Counts the number of files within the specified directory
+    :param path: the top level path to count files in
+    :param recursive: true if counting should include sub-directories
+    :return: the number of files in the specified path
+    """
+    count = 0
+    try:
+        for p in os.scandir(path):
+            if p.is_file():
+                count += 1
+            if recursive and p.is_dir():
+                count += _count_files(p.path, recursive)
+    except (IOError, OSError) as e:
+        print("Permission Error ({0}): {1} for {2}".format(e.errno, e.strerror, path))
+
+    return count
 
 
 def _list_files(directory, base_path=None, recursive=True):
@@ -69,13 +99,13 @@ def _list_files(directory, base_path=None, recursive=True):
             if recursive and p.is_dir():
                 files.extend(_list_files(p.path, base_path, recursive))
     except (IOError, OSError) as e:
-        print ("Permission Error ({0}): {1} for {2}".format(e.errno, e.strerror, directory))
+        print("Permission Error ({0}): {1} for {2}".format(e.errno, e.strerror, directory))
 
     return files
 
 
 def _print_results_list(results_list):
-    print ('\n'.join(results_list))
+    print('\n'.join(results_list))
 
 
 def _write_report(results):
@@ -104,6 +134,7 @@ def _write_report(results):
         out = csv.writer(additional_csv)
         for el in results["additional"]:
             out.writerow([el])
+
 
 def validate_checksums(directory, manifest_file=None):
     if manifest_file is None:
@@ -134,21 +165,21 @@ def validate_checksums(directory, manifest_file=None):
 
     # list all original
     if len(results["found"]["correct"]) == len(original_cs):
-        print ("All files in manifest correct")
+        print("All files in manifest correct")
 
     else:
-        print ("Correct Files:")
+        print("Correct Files:")
         _print_results_list(results["found"]["correct"])
 
-        print ("\nIncorrect Files:")
+        print("\nIncorrect Files:")
         _print_results_list(results["found"]["incorrect"])
 
     if len(results["missing"]) > 0:
-        print ("\nFiles listed in manifest, not in directory:")
+        print("\nFiles listed in manifest, not in directory:")
         _print_results_list(results["missing"])
 
     if len(results["additional"]) > 0:
-        print ("\nAdditional Files not listed in manifest:")
+        print("\nAdditional Files not listed in manifest:")
         _print_results_list(results["additional"])
 
     _write_report(results)
@@ -171,6 +202,7 @@ def main(args=None):
     create_parser.add_argument("-m", dest="manifest", help="the manifest to create [default: manifest.md5 in dir]")
     create_parser.add_argument("-r", "--recursive", dest="recursive", action="store_true",
                                help="recurse into sub-folders [defaults")
+    create_parser.add_argument("--no-timing", dest="timing", action="store_false", help="turn off progress bar")
     create_parser.set_defaults(func=calculate_checksums)
 
     ## Args for validating manifests
@@ -194,5 +226,5 @@ def main(args=None):
         ap.print_help()
 
 
-if __name__=='__main__':
+if __name__ == '__main__':
     main()
