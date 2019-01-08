@@ -7,20 +7,20 @@ from os.path import isdir, join, relpath
 from progressbar import ProgressBar, UnknownLength
 from filechecker import __version__
 
-default_manifest = "manifest.sha256"
-cs_ignore = [".md5", ".sha256"]
+default_alg = "sha256"
+default_manifest_prefix = "manifest."
+#cs_ignore = [".md5", ".sha256"]
+cs_ignore = ["."+x for x in hashlib.algorithms_guaranteed]
 
-
-def hash_data(filename, algorithm="sha256", blocksize=256*128):
+def hash_data(filename, algorithm=default_alg, blocksize=256*128):
     hash = hashlib.new(algorithm)
-    #hash = hashlib.md5()
     with open(u'\\\\?\\'+filename, "rb") as f:
         for block in iter(lambda: f.read(blocksize), b""):
             hash.update(block)
     return hash.hexdigest()
 
 
-def checksum_dir(directory, recursive=False, formats=None):
+def checksum_dir(directory, recursive=False, algorithm=default_alg, formats=None):
     """Checksums the specified directory, recursing down into subfolders as necessary"""
 
     ignore_ext = cs_ignore
@@ -36,7 +36,7 @@ def checksum_dir(directory, recursive=False, formats=None):
             for file in filtered_files:
                 path = join(root, file)
                 r_path = join(".", relpath(path, directory))
-                hash = hash_data(path)
+                hash = hash_data(path, algorithm)
                 #yield "{0} *{1}\n".format(hash, r_path)
                 yield (hash, r_path)
             if not recursive:
@@ -44,17 +44,17 @@ def checksum_dir(directory, recursive=False, formats=None):
                 return
 
 
-def calculate_checksums(directory, recursive=False, formats=None, manifest_file=None, timing=True):
+def calculate_checksums(directory, algorithm=default_alg, manifest_file=None, formats=None, recursive=False, timing=True):
 
     if timing:
         numfiles = _count_files(directory, recursive)
         bar = ProgressBar(max_value=numfiles)
 
     if manifest_file is None:
-        manifest_file = join(directory, default_manifest)
+        manifest_file = join(directory, default_manifest_prefix+algorithm)
 
     with open(manifest_file, 'w') as manifest:
-        for cs in checksum_dir(directory, recursive, formats):
+        for cs in checksum_dir(directory, recursive, algorithm, formats):
             manifest.write("{0} *{1}\n".format(cs[0], cs[1]))
             manifest.flush()
             if timing:
@@ -136,9 +136,20 @@ def _write_report(results):
             out.writerow([el])
 
 
-def validate_checksums(directory, manifest_file=None):
+def validate_checksums(directory, algorithm=None, manifest_file=None, timing=True):
+    # algorithm overides algorithm calculated from manifest file name
+
     if manifest_file is None:
-        manifest_file = join(directory, default_manifest)
+        manifest_file = join(directory, default_manifest_prefix+default_alg)
+
+    # set algorithm based on manifest extension
+    manifest_alg = algorithm
+
+    if manifest_alg is None:
+        manifest_alg = manifest_file.rsplit('.', 1)[1]
+
+
+    # TODO: Improve manifest selection based on length of hash values within the manifest
 
     # Load checksums from target manifest
     original_cs = {}
@@ -151,10 +162,14 @@ def validate_checksums(directory, manifest_file=None):
                "missing": [],
                "additional": {fname: None for fname in _list_files(directory)}}
 
+    if timing:
+        numfiles = len(original_cs.keys())
+        bar = ProgressBar(max_value=numfiles)
+
     for f in original_cs.keys():
         full_path = join(directory, f[2:])
         if os.path.exists(full_path):
-            current_cs = hash_data(full_path)
+            current_cs = hash_data(full_path, algorithm=manifest_alg)
             if current_cs == original_cs[f]:
                 results["found"]["correct"].append(f)
             else:
@@ -162,6 +177,12 @@ def validate_checksums(directory, manifest_file=None):
             del results["additional"][f]
         else:
             results["missing"].append(f)
+
+        if timing:
+            bar.update(bar.value + 1)
+
+    if timing:
+        bar.finish()
 
     # list all original
     if len(results["found"]["correct"]) == len(original_cs):
@@ -197,16 +218,24 @@ def main(args=None):
 
     ## Args for creating manifests
     create_parser = actionparser.add_parser("create")
+    create_parser.add_argument("-a", "--algorithm", dest="algorithm",
+                               choices=hashlib.algorithms_guaranteed,
+                               default=default_alg,
+                               help="the checksum algorithm to use [default: sha256]")
     create_parser.add_argument("--formats", dest="formats", nargs="+", help="list of file extensions to include (only)")
     #create_parser.add_argument("--ignore", dest="ignore", help="list of additional file extensions to ignore")
     create_parser.add_argument("-m", dest="manifest", help="the manifest to create [default: manifest.md5 in dir]")
     create_parser.add_argument("-r", "--recursive", dest="recursive", action="store_true",
-                               help="recurse into sub-folders [defaults")
+                               help="recurse into sub-folders [default: false]")
     create_parser.add_argument("--no-timing", dest="timing", action="store_false", help="turn off progress bar")
     create_parser.set_defaults(func=calculate_checksums)
 
     ## Args for validating manifests
     validate_parser = actionparser.add_parser("validate")
+    validate_parser.add_argument("-a", "--algorithm", dest="algorithm",
+                               choices=hashlib.algorithms_guaranteed,
+                               default=default_alg,
+                               help="the checksum algorithm to use [default: sha256]")
     validate_parser.add_argument("-m", dest="manifest", help="the manifest to validate [default: manifest.md5 in dir]")
     validate_parser.set_defaults(func=validate_checksums)
 
@@ -219,9 +248,9 @@ def main(args=None):
 
     try:
         if args.actions=='create':
-            calculate_checksums(args.dir, args.recursive, args.formats, args.manifest)
+            calculate_checksums(args.dir, args.algorithm, args.manifest, args.formats, args.recursive)
         elif args.actions=='validate':
-            validate_checksums(args.dir, args.manifest)
+            validate_checksums(args.dir, args.algorithm, args.manifest)
     except AttributeError:
         ap.print_help()
 
