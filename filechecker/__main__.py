@@ -139,15 +139,34 @@ def _write_report(results):
 def validate_checksums(directory, algorithm=None, manifest_file=None, timing=True):
     # algorithm overides algorithm calculated from manifest file name
 
-    if manifest_file is None:
-        manifest_file = join(directory, default_manifest_prefix+default_alg)
+    # manifest specified
+    #   alg specified
+    #      => manifest_alg = alg
+    #      => manifest_file = manifest_file
+    #   alg None
+    #      => manifest_alg = extension_alg
+    #      => manifest_file = manifest_file
+    # manifest None
+    #   alg specified
+    #      => manifest_alg = alg
+    #      => manifest_file = default_prefix+alg
+    #   alg None
+    #      => manifest_alg = default_alg
+    #      => manifest_file = default_prefix+default_alg
 
-    # set algorithm based on manifest extension
     manifest_alg = algorithm
 
-    if manifest_alg is None:
-        manifest_alg = manifest_file.rsplit('.', 1)[1]
-
+    if manifest_file is None:
+        # if no algorithm specified use the default
+        if manifest_alg is None:
+            manifest_alg = default_alg
+        # Look for manifest.manifest_alg file
+        manifest_file = join(directory, default_manifest_prefix+manifest_alg)
+    else:
+        # we have a manifest, so either use specified algorithm or select one from extension (if an alg was not set)
+        # set algorithm based on manifest extension
+        if manifest_alg is None:
+            manifest_alg = manifest_file.rsplit('.', 1)[1]
 
     # TODO: Improve manifest selection based on length of hash values within the manifest
 
